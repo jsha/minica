@@ -1,0 +1,244 @@
+// minica is a small, simple CA intended for use in situations where the CA operator
+// also operates each host where a certificate will be used. It automatically
+// generates both a key and a certificate when asked to produce a certificate.
+// It does not offer OCSP or CRL services. Minica is appropriate, for instance,
+// for generating certificates for RPC systems or microservices.
+package main
+
+import (
+	"crypto"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/hex"
+	"encoding/pem"
+	"flag"
+	"fmt"
+	"io/ioutil"
+	"log"
+	"math"
+	"math/big"
+	"net"
+	"os"
+	"strings"
+	"time"
+)
+
+func main() {
+	err := main2()
+	if err != nil {
+		log.Fatal(err)
+	}
+}
+
+type issuer struct {
+	key  crypto.Signer
+	cert *x509.Certificate
+}
+
+func getIssuer(keyFile, certFile string, autoCreate bool) (*issuer, error) {
+	keyContents, keyErr := ioutil.ReadFile(keyFile)
+	certContents, certErr := ioutil.ReadFile(certFile)
+	if os.IsNotExist(keyErr) && os.IsNotExist(certErr) {
+		err := makeIssuer(keyFile, certFile)
+		if err != nil {
+			return nil, err
+		}
+		return getIssuer(keyFile, certFile, false)
+	} else if keyErr != nil {
+		return nil, fmt.Errorf("%s (but %s exists)", keyErr, certFile)
+	} else if certErr != nil {
+		return nil, fmt.Errorf("%s (but %s exists)", certErr, keyFile)
+	}
+	key, err := readPrivateKey(keyContents)
+	if err != nil {
+		return nil, fmt.Errorf("reading private key from %s: %s", keyFile, err)
+	}
+
+	cert, err := readCert(certContents)
+	if err != nil {
+		return nil, fmt.Errorf("reading CA certificate from %s: %s", certFile, err)
+	}
+
+	return &issuer{key, cert}, nil
+}
+
+func readPrivateKey(keyContents []byte) (crypto.Signer, error) {
+	block, _ := pem.Decode(keyContents)
+	if block == nil {
+		return nil, fmt.Errorf("no PEM found")
+	} else if block.Type != "RSA PRIVATE KEY" && block.Type != "ECDSA PRIVATE KEY" {
+		return nil, fmt.Errorf("incorrect PEM type %s", block.Type)
+	}
+	return x509.ParsePKCS1PrivateKey(block.Bytes)
+}
+
+func readCert(certContents []byte) (*x509.Certificate, error) {
+	block, _ := pem.Decode(certContents)
+	if block == nil {
+		return nil, fmt.Errorf("no PEM found")
+	} else if block.Type != "CERTIFICATE" && block.Type != "CERTIFICATE" {
+		return nil, fmt.Errorf("incorrect PEM type %s", block.Type)
+	}
+	return x509.ParseCertificate(block.Bytes)
+}
+
+func makeIssuer(keyFile, certFile string) error {
+	key, err := makeKey(keyFile)
+	if err != nil {
+		return err
+	}
+	_, err = makeCert(key, certFile)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func makeKey(filename string) (*rsa.PrivateKey, error) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		return nil, err
+	}
+	der := x509.MarshalPKCS1PrivateKey(key)
+	if err != nil {
+		return nil, err
+	}
+	file, err := os.OpenFile(filename, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	err = pem.Encode(file, &pem.Block{
+		Type:  "RSA PRIVATE KEY",
+		Bytes: der,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return key, nil
+}
+
+func makeCert(key crypto.Signer, filename string) (*x509.Certificate, error) {
+	serial, err := rand.Int(rand.Reader, big.NewInt(math.MaxInt64))
+	if err != nil {
+		return nil, err
+	}
+	template := &x509.Certificate{
+		Subject: pkix.Name{
+			CommonName: "minica root ca " + hex.EncodeToString(serial.Bytes()[:3]),
+		},
+		SerialNumber: serial,
+		NotBefore:    time.Now(),
+		NotAfter:     time.Now().AddDate(100, 0, 0),
+
+		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
+		BasicConstraintsValid: true,
+		IsCA:           true,
+		MaxPathLenZero: true,
+	}
+
+	der, err := x509.CreateCertificate(rand.Reader, template, template, key.Public(), key)
+	if err != nil {
+		return nil, err
+	}
+	file, err := os.OpenFile(filename, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	err = pem.Encode(file, &pem.Block{
+		Type:  "CERTIFICATE",
+		Bytes: der,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return x509.ParseCertificate(der)
+}
+
+func parseIPs(ipAddresses []string) ([]net.IP, error) {
+	var parsed []net.IP
+	for _, s := range ipAddresses {
+		p := net.ParseIP(s)
+		if p == nil {
+			return nil, fmt.Errorf("invalid IP address %s", s)
+		}
+		parsed = append(parsed, p)
+	}
+	return parsed, nil
+}
+
+func sign(iss *issuer, domains []string, ipAddresses []string) (*x509.Certificate, error) {
+	var cn string
+	if len(domains) > 0 {
+		cn = domains[0]
+	} else if len(ipAddresses) > 0 {
+		cn = ipAddresses[0]
+	} else {
+		return nil, fmt.Errorf("must specify at least one domain name or IP address")
+	}
+	parsedIPs, err := parseIPs(ipAddresses)
+	if err != nil {
+		return nil, err
+	}
+	serial, err := rand.Int(rand.Reader, big.NewInt(math.MaxInt64))
+	if err != nil {
+		return nil, err
+	}
+	template := &x509.Certificate{
+		DNSNames:    domains,
+		IPAddresses: parsedIPs,
+		Subject: pkix.Name{
+			CommonName: cn,
+		},
+		SerialNumber: serial,
+		NotBefore:    time.Now(),
+		NotAfter:     time.Now().AddDate(90, 0, 0),
+
+		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
+		BasicConstraintsValid: true,
+		IsCA: false,
+	}
+	der, err := x509.CreateCertificate(rand.Reader, template, iss.cert, iss.key.Public(), iss.key)
+	if err != nil {
+		return nil, err
+	}
+	file, err := os.OpenFile(cn+".pem", os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	err = pem.Encode(file, &pem.Block{
+		Type:  "CERTIFICATE",
+		Bytes: der,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return x509.ParseCertificate(der)
+}
+
+func split(s string) (results []string) {
+	if len(s) > 0 {
+		return strings.Split(s, ",")
+	}
+	return nil
+}
+
+func main2() error {
+	var domains = flag.String("domains", "", "Domain names to include as Server Alternative Names.")
+	var ipAddresses = flag.String("ip-addresses", "", "IP Addresses to include as Server Alternative Names.")
+	var caKey = flag.String("ca-key", "minica-key.pem", "Root private key, PEM encoded")
+	var caCert = flag.String("ca-cert", "minica.pem", "Root certificate, PEM encoded")
+	flag.Parse()
+	if *domains == "" && *ipAddresses == "" {
+		return fmt.Errorf("Provide at least one of --domains or --ip-addresses")
+	}
+	issuer, err := getIssuer(*caKey, *caCert, true)
+	_, err = sign(issuer, split(*domains), split(*ipAddresses))
+	return err
+}
