@@ -16,6 +16,9 @@ the certificate, or the first IP address if no domain names are present. It
 will not overwrite existing keys or certificates.
 
   --ca-cert: Root certificate filename, PEM encoded (default "minica.pem").
+
   --ca-key: Root private key filename, PEM encoded (default "minica-key.pem").
+
   --domains: Domain names to include as Server Alternative Names.
+
   --ip-addresses: IP Addresses to include as Server Alternative Names.
