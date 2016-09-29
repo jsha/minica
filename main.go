@@ -233,10 +233,10 @@ func split(s string) (results []string) {
 }
 
 func main2() error {
+	var caKey = flag.String("ca-key", "minica-key.pem", "Root private key filename, PEM encoded.")
+	var caCert = flag.String("ca-cert", "minica.pem", "Root certificate filename, PEM encoded.")
 	var domains = flag.String("domains", "", "Domain names to include as Server Alternative Names.")
 	var ipAddresses = flag.String("ip-addresses", "", "IP Addresses to include as Server Alternative Names.")
-	var caKey = flag.String("ca-key", "minica-key.pem", "Root private key filename, PEM encoded")
-	var caCert = flag.String("ca-cert", "minica.pem", "Root certificate filename, PEM encoded")
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage of %s:\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, `
@@ -256,12 +256,14 @@ and/or IP addresses from the command line flags. The key and certificate are
 placed in a new directory whose name is chosen as the first domain name from
 the certificate, or the first IP address if no domain names are present. It
 will not overwrite existing keys or certificates.
+
 `)
 		flag.PrintDefaults()
 	}
 	flag.Parse()
 	if *domains == "" && *ipAddresses == "" {
-		return fmt.Errorf("Provide at least one of --domains or --ip-addresses")
+		flag.Usage()
+		os.Exit(1)
 	}
 	issuer, err := getIssuer(*caKey, *caCert, true)
 	_, err = sign(issuer, split(*domains), split(*ipAddresses))
