@@ -15,10 +15,17 @@ placed in a new directory whose name is chosen as the first domain name from
 the certificate, or the first IP address if no domain names are present. It
 will not overwrite existing keys or certificates.
 
-  --ca-cert: Root certificate filename, PEM encoded (default "minica.pem").
+# Installation
 
-  --ca-key: Root private key filename, PEM encoded (default "minica-key.pem").
+First, install the [Go tools](https://golang.org/dl/) and set up your `$GOPATH`.
+Then, run:
 
-  --domains: Domain names to include as Server Alternative Names.
+`go get github.com/jsha/minica`
 
-  --ip-addresses: IP Addresses to include as Server Alternative Names.
+# Example usage
+
+```
+# Generate a root key and cert in minica-key.pem, and minica.pem, then
+# generate and sign an end-entity key and cert, storing them in ./foo.com/
+$ minica --domains foo.com
+```
