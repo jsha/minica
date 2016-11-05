@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto"
 	"crypto/rand"
 	"crypto/rsa"
@@ -56,6 +57,13 @@ func getIssuer(keyFile, certFile string, autoCreate bool) (*issuer, error) {
 		return nil, fmt.Errorf("reading CA certificate from %s: %s", certFile, err)
 	}
 
+	equal, err := publicKeysEqual(key.Public(), cert.PublicKey)
+	if err != nil {
+		return nil, fmt.Errorf("comparing public keys: %s", err)
+	} else if !equal {
+		return nil, fmt.Errorf("public key in CA certificate %s doesn't match private key in %s",
+			certFile, keyFile)
+	}
 	return &issuer{key, cert}, nil
 }
 
@@ -166,6 +174,18 @@ func parseIPs(ipAddresses []string) ([]net.IP, error) {
 	return parsed, nil
 }
 
+func publicKeysEqual(a, b interface{}) (bool, error) {
+	aBytes, err := x509.MarshalPKIXPublicKey(a)
+	if err != nil {
+		return false, err
+	}
+	bBytes, err := x509.MarshalPKIXPublicKey(b)
+	if err != nil {
+		return false, err
+	}
+	return bytes.Compare(aBytes, bBytes) == 0, nil
+}
+
 func sign(iss *issuer, domains []string, ipAddresses []string) (*x509.Certificate, error) {
 	var cn string
 	if len(domains) > 0 {
@@ -197,7 +217,6 @@ func sign(iss *issuer, domains []string, ipAddresses []string) (*x509.Certificat
 		Subject: pkix.Name{
 			CommonName: cn,
 		},
-		PublicKey:    key.Public(),
 		SerialNumber: serial,
 		NotBefore:    time.Now(),
 		NotAfter:     time.Now().AddDate(90, 0, 0),
@@ -207,7 +226,7 @@ func sign(iss *issuer, domains []string, ipAddresses []string) (*x509.Certificat
 		BasicConstraintsValid: true,
 		IsCA: false,
 	}
-	der, err := x509.CreateCertificate(rand.Reader, template, iss.cert, iss.key.Public(), iss.key)
+	der, err := x509.CreateCertificate(rand.Reader, template, iss.cert, key.Public(), iss.key)
 	if err != nil {
 		return nil, err
 	}
@@ -267,6 +286,9 @@ will not overwrite existing keys or certificates.
 		os.Exit(1)
 	}
 	issuer, err := getIssuer(*caKey, *caCert, true)
+	if err != nil {
+		return err
+	}
 	_, err = sign(issuer, split(*domains), split(*ipAddresses))
 	return err
 }
