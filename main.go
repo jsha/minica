@@ -197,6 +197,7 @@ func sign(iss *issuer, domains []string, ipAddresses []string) (*x509.Certificat
 		Subject: pkix.Name{
 			CommonName: cn,
 		},
+		PublicKey:    key.Public(),
 		SerialNumber: serial,
 		NotBefore:    time.Now(),
 		NotAfter:     time.Now().AddDate(90, 0, 0),
@@ -206,7 +207,7 @@ func sign(iss *issuer, domains []string, ipAddresses []string) (*x509.Certificat
 		BasicConstraintsValid: true,
 		IsCA: false,
 	}
-	der, err := x509.CreateCertificate(rand.Reader, template, iss.cert, key.Public(), key)
+	der, err := x509.CreateCertificate(rand.Reader, template, iss.cert, iss.key.Public(), iss.key)
 	if err != nil {
 		return nil, err
 	}
