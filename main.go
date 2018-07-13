@@ -81,7 +81,7 @@ func readCert(certContents []byte) (*x509.Certificate, error) {
 	block, _ := pem.Decode(certContents)
 	if block == nil {
 		return nil, fmt.Errorf("no PEM found")
-	} else if block.Type != "CERTIFICATE" && block.Type != "CERTIFICATE" {
+	} else if block.Type != "CERTIFICATE" {
 		return nil, fmt.Errorf("incorrect PEM type %s", block.Type)
 	}
 	return x509.ParseCertificate(block.Bytes)
