@@ -195,11 +195,12 @@ func sign(iss *issuer, domains []string, ipAddresses []string) (*x509.Certificat
 	} else {
 		return nil, fmt.Errorf("must specify at least one domain name or IP address")
 	}
-	err := os.Mkdir(cn, 0700)
+	var cnFolder = strings.Replace(cn, "*", "wildcard", -1)
+	err := os.Mkdir(cnFolder, 0700)
 	if err != nil && !os.IsExist(err) {
 		return nil, err
 	}
-	key, err := makeKey(fmt.Sprintf("%s/key.pem", cn))
+	key, err := makeKey(fmt.Sprintf("%s/key.pem", cnFolder))
 	if err != nil {
 		return nil, err
 	}
@@ -230,7 +231,7 @@ func sign(iss *issuer, domains []string, ipAddresses []string) (*x509.Certificat
 	if err != nil {
 		return nil, err
 	}
-	file, err := os.OpenFile(fmt.Sprintf("%s/cert.pem", cn), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+	file, err := os.OpenFile(fmt.Sprintf("%s/cert.pem", cnFolder), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
 	if err != nil {
 		return nil, err
 	}
