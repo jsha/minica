@@ -195,7 +195,7 @@ func sign(iss *issuer, domains []string, ipAddresses []string) (*x509.Certificat
 	} else {
 		return nil, fmt.Errorf("must specify at least one domain name or IP address")
 	}
-	var cnFolder = strings.Replace(cn, "*", "wildcard", -1)
+	var cnFolder = strings.Replace(cn, "*", "_", -1)
 	err := os.Mkdir(cnFolder, 0700)
 	if err != nil && !os.IsExist(err) {
 		return nil, err
