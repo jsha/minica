@@ -256,8 +256,8 @@ func split(s string) (results []string) {
 func main2() error {
 	var caKey = flag.String("ca-key", "minica-key.pem", "Root private key filename, PEM encoded.")
 	var caCert = flag.String("ca-cert", "minica.pem", "Root certificate filename, PEM encoded.")
-	var domains = flag.String("domains", "", "Domain names to include as Server Alternative Names.")
-	var ipAddresses = flag.String("ip-addresses", "", "IP Addresses to include as Server Alternative Names.")
+	var domains = flag.String("domains", "", "Comma separated domain names to include as Server Alternative Names.")
+	var ipAddresses = flag.String("ip-addresses", "", "Comma separated IP addresses to include as Server Alternative Names.")
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage of %s:\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, `
