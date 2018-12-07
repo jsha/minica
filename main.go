@@ -8,6 +8,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/hex"
+	"encoding/json"
 	"encoding/pem"
 	"flag"
 	"fmt"
@@ -33,15 +34,55 @@ type issuer struct {
 	cert *x509.Certificate
 }
 
-func getIssuer(keyFile, certFile string, autoCreate bool) (*issuer, error) {
+// Subject represents a JSON description of a PKIX Name
+type Subject struct {
+	CommonName         string        `json:"common_name,omitempty"`
+	SerialNumber       string        `json:"serial_number,omitempty"`
+	Country            string        `json:"country,omitempty"`
+	Organization       string        `json:"organization,omitempty"`
+	OrganizationalUnit string        `json:"organizational_unit,omitempty"`
+	Locality           string        `json:"locality,omitempty"`
+	Province           string        `json:"province,omitempty"`
+	StreetAddress      string        `json:"street_address,omitempty"`
+	PostalCode         string        `json:"postal_code,omitempty"`
+	Names              []interface{} `json:"names,omitempty"`
+	ExtraNames         []interface{} `json:"extra_names,omitempty"`
+}
+
+func parseSubject(jsonFile string) (pkix.Name, error) {
+	raw, readErr := ioutil.ReadFile(jsonFile)
+	if readErr != nil {
+		return pkix.Name{}, readErr
+	}
+	var subject Subject
+	err := json.Unmarshal(raw, &subject)
+	if err != nil {
+		return pkix.Name{}, fmt.Errorf("parsing subject JSON file: %s", err)
+	}
+
+	n := pkix.Name{
+		CommonName:         subject.CommonName,
+		SerialNumber:       subject.SerialNumber,
+		Country:            []string{subject.Country},
+		Organization:       []string{subject.Organization},
+		OrganizationalUnit: []string{subject.OrganizationalUnit},
+		Locality:           []string{subject.Locality},
+		Province:           []string{subject.Province},
+		StreetAddress:      []string{subject.StreetAddress},
+		PostalCode:         []string{subject.PostalCode},
+	}
+	return n, nil
+}
+
+func getIssuer(keyFile, certFile string, subjectFile string, autoCreate bool) (*issuer, error) {
 	keyContents, keyErr := ioutil.ReadFile(keyFile)
 	certContents, certErr := ioutil.ReadFile(certFile)
 	if os.IsNotExist(keyErr) && os.IsNotExist(certErr) {
-		err := makeIssuer(keyFile, certFile)
+		err := makeIssuer(keyFile, certFile, subjectFile)
 		if err != nil {
 			return nil, err
 		}
-		return getIssuer(keyFile, certFile, false)
+		return getIssuer(keyFile, certFile, subjectFile, false)
 	} else if keyErr != nil {
 		return nil, fmt.Errorf("%s (but %s exists)", keyErr, certFile)
 	} else if certErr != nil {
@@ -87,12 +128,12 @@ func readCert(certContents []byte) (*x509.Certificate, error) {
 	return x509.ParseCertificate(block.Bytes)
 }
 
-func makeIssuer(keyFile, certFile string) error {
+func makeIssuer(keyFile, certFile string, subjectFile string) error {
 	key, err := makeKey(keyFile)
 	if err != nil {
 		return err
 	}
-	_, err = makeRootCert(key, certFile)
+	_, err = makeRootCert(key, certFile, subjectFile)
 	if err != nil {
 		return err
 	}
@@ -123,15 +164,29 @@ func makeKey(filename string) (*rsa.PrivateKey, error) {
 	return key, nil
 }
 
-func makeRootCert(key crypto.Signer, filename string) (*x509.Certificate, error) {
+func makeRootCert(key crypto.Signer, filename string, subjectFile string) (*x509.Certificate, error) {
 	serial, err := rand.Int(rand.Reader, big.NewInt(math.MaxInt64))
 	if err != nil {
 		return nil, err
 	}
+
+	subject := func() pkix.Name {
+		if subjectFile == "" {
+			return pkix.Name{
+				CommonName: "minica Root CA " + hex.EncodeToString(serial.Bytes()[:3]),
+			}
+		}
+
+		subject, err := parseSubject(subjectFile)
+		if err != nil {
+			log.Fatal(err)
+		}
+		return subject
+	}()
+	log.Printf("using Root CA subject %s", subject)
+
 	template := &x509.Certificate{
-		Subject: pkix.Name{
-			CommonName: "minica root ca " + hex.EncodeToString(serial.Bytes()[:3]),
-		},
+		Subject:      subject,
 		SerialNumber: serial,
 		NotBefore:    time.Now(),
 		NotAfter:     time.Now().AddDate(100, 0, 0),
@@ -139,8 +194,8 @@ func makeRootCert(key crypto.Signer, filename string) (*x509.Certificate, error)
 		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
 		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
 		BasicConstraintsValid: true,
-		IsCA:           true,
-		MaxPathLenZero: true,
+		IsCA:                  true,
+		MaxPathLenZero:        true,
 	}
 
 	der, err := x509.CreateCertificate(rand.Reader, template, template, key.Public(), key)
@@ -225,7 +280,7 @@ func sign(iss *issuer, domains []string, ipAddresses []string) (*x509.Certificat
 		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
 		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
 		BasicConstraintsValid: true,
-		IsCA: false,
+		IsCA:                  false,
 	}
 	der, err := x509.CreateCertificate(rand.Reader, template, iss.cert, key.Public(), iss.key)
 	if err != nil {
@@ -256,6 +311,7 @@ func split(s string) (results []string) {
 func main2() error {
 	var caKey = flag.String("ca-key", "minica-key.pem", "Root private key filename, PEM encoded.")
 	var caCert = flag.String("ca-cert", "minica.pem", "Root certificate filename, PEM encoded.")
+	var subjectFile = flag.String("subject-file", "", "JSON file with subject information (optional).")
 	var domains = flag.String("domains", "", "Comma separated domain names to include as Server Alternative Names.")
 	var ipAddresses = flag.String("ip-addresses", "", "Comma separated IP addresses to include as Server Alternative Names.")
 	flag.Usage = func() {
@@ -271,13 +327,28 @@ On first run, minica will generate a keypair and a root certificate in the
 current directory, and will reuse that same keypair and root certificate
 unless they are deleted.
 
+Optionally, you can provide a JSON file for the root CA's subject:
+
+{
+	"common_name": "",
+	"serial_number": "",
+	"country": "",
+	"organization": "",
+	"organizational_unit": "",
+	"locality": "",
+	"province": "",
+	"street_address": "",
+	"postal_code": "",
+	"names": [],
+	"extra_names": []
+}
+
 On each run, minica will generate a new keypair and sign an end-entity (leaf)
 certificate for that keypair. The certificate will contain a list of DNS names
 and/or IP addresses from the command line flags. The key and certificate are
 placed in a new directory whose name is chosen as the first domain name from
 the certificate, or the first IP address if no domain names are present. It
 will not overwrite existing keys or certificates.
-
 `)
 		flag.PrintDefaults()
 	}
@@ -286,7 +357,8 @@ will not overwrite existing keys or certificates.
 		flag.Usage()
 		os.Exit(1)
 	}
-	issuer, err := getIssuer(*caKey, *caCert, true)
+
+	issuer, err := getIssuer(*caKey, *caCert, *subjectFile, true)
 	if err != nil {
 		return err
 	}
