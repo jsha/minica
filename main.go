@@ -17,6 +17,7 @@ import (
 	"math/big"
 	"net"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -139,8 +140,8 @@ func makeRootCert(key crypto.Signer, filename string) (*x509.Certificate, error)
 		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
 		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
 		BasicConstraintsValid: true,
-		IsCA:           true,
-		MaxPathLenZero: true,
+		IsCA:                  true,
+		MaxPathLenZero:        true,
 	}
 
 	der, err := x509.CreateCertificate(rand.Reader, template, template, key.Public(), key)
@@ -224,7 +225,7 @@ func sign(iss *issuer, domains []string, ipAddresses []string) (*x509.Certificat
 		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
 		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
 		BasicConstraintsValid: true,
-		IsCA: false,
+		IsCA:                  false,
 	}
 	der, err := x509.CreateCertificate(rand.Reader, template, iss.cert, key.Public(), iss.key)
 	if err != nil {
@@ -285,10 +286,29 @@ will not overwrite existing keys or certificates.
 		flag.Usage()
 		os.Exit(1)
 	}
+	if len(flag.Args()) > 0 {
+		fmt.Printf("Extra arguments: %s (maybe there are spaces in your domain list?)\n", flag.Args())
+		os.Exit(1)
+	}
+	domainSlice := split(*domains)
+	domainRe := regexp.MustCompile("^[A-Za-z0-9.-]+$")
+	for _, d := range domainSlice {
+		if !domainRe.MatchString(d) {
+			fmt.Printf("Invalid domain name %q\n", d)
+			os.Exit(1)
+		}
+	}
+	ipSlice := split(*ipAddresses)
+	for _, ip := range ipSlice {
+		if net.ParseIP(ip) == nil {
+			fmt.Printf("Invalid IP address %q\n", ip)
+			os.Exit(1)
+		}
+	}
 	issuer, err := getIssuer(*caKey, *caCert, true)
 	if err != nil {
 		return err
 	}
-	_, err = sign(issuer, split(*domains), split(*ipAddresses))
+	_, err = sign(issuer, domainSlice, ipSlice)
 	return err
 }
