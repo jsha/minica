@@ -82,7 +82,7 @@ func readCert(certContents []byte) (*x509.Certificate, error) {
 	block, _ := pem.Decode(certContents)
 	if block == nil {
 		return nil, fmt.Errorf("no PEM found")
-	} else if block.Type != "CERTIFICATE" && block.Type != "CERTIFICATE" {
+	} else if block.Type != "CERTIFICATE" {
 		return nil, fmt.Errorf("incorrect PEM type %s", block.Type)
 	}
 	return x509.ParseCertificate(block.Bytes)
@@ -196,11 +196,12 @@ func sign(iss *issuer, domains []string, ipAddresses []string) (*x509.Certificat
 	} else {
 		return nil, fmt.Errorf("must specify at least one domain name or IP address")
 	}
-	err := os.Mkdir(cn, 0700)
+	var cnFolder = strings.Replace(cn, "*", "_", -1)
+	err := os.Mkdir(cnFolder, 0700)
 	if err != nil && !os.IsExist(err) {
 		return nil, err
 	}
-	key, err := makeKey(fmt.Sprintf("%s/key.pem", cn))
+	key, err := makeKey(fmt.Sprintf("%s/key.pem", cnFolder))
 	if err != nil {
 		return nil, err
 	}
@@ -231,7 +232,7 @@ func sign(iss *issuer, domains []string, ipAddresses []string) (*x509.Certificat
 	if err != nil {
 		return nil, err
 	}
-	file, err := os.OpenFile(fmt.Sprintf("%s/cert.pem", cn), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+	file, err := os.OpenFile(fmt.Sprintf("%s/cert.pem", cnFolder), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
 	if err != nil {
 		return nil, err
 	}
@@ -256,8 +257,8 @@ func split(s string) (results []string) {
 func main2() error {
 	var caKey = flag.String("ca-key", "minica-key.pem", "Root private key filename, PEM encoded.")
 	var caCert = flag.String("ca-cert", "minica.pem", "Root certificate filename, PEM encoded.")
-	var domains = flag.String("domains", "", "Domain names to include as Server Alternative Names.")
-	var ipAddresses = flag.String("ip-addresses", "", "IP Addresses to include as Server Alternative Names.")
+	var domains = flag.String("domains", "", "Comma separated domain names to include as Server Alternative Names.")
+	var ipAddresses = flag.String("ip-addresses", "", "Comma separated IP addresses to include as Server Alternative Names.")
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage of %s:\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, `
