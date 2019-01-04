@@ -292,7 +292,7 @@ will not overwrite existing keys or certificates.
 		os.Exit(1)
 	}
 	domainSlice := split(*domains)
-	domainRe := regexp.MustCompile("^[A-Za-z0-9.-]+$")
+	domainRe := regexp.MustCompile("^[A-Za-z0-9.*-]+$")
 	for _, d := range domainSlice {
 		if !domainRe.MatchString(d) {
 			fmt.Printf("Invalid domain name %q\n", d)
