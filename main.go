@@ -34,7 +34,7 @@ type issuer struct {
 	cert *x509.Certificate
 }
 
-func getIssuer(keyFile, certFile string, autoCreate bool) (*issuer, error) {
+func getIssuer(keyFile, certFile string) (*issuer, error) {
 	keyContents, keyErr := ioutil.ReadFile(keyFile)
 	certContents, certErr := ioutil.ReadFile(certFile)
 	if os.IsNotExist(keyErr) && os.IsNotExist(certErr) {
@@ -42,7 +42,7 @@ func getIssuer(keyFile, certFile string, autoCreate bool) (*issuer, error) {
 		if err != nil {
 			return nil, err
 		}
-		return getIssuer(keyFile, certFile, false)
+		return getIssuer(keyFile, certFile)
 	} else if keyErr != nil {
 		return nil, fmt.Errorf("%s (but %s exists)", keyErr, certFile)
 	} else if certErr != nil {
@@ -306,7 +306,7 @@ will not overwrite existing keys or certificates.
 			os.Exit(1)
 		}
 	}
-	issuer, err := getIssuer(*caKey, *caCert, true)
+	issuer, err := getIssuer(*caKey, *caCert)
 	if err != nil {
 		return err
 	}
