@@ -15,6 +15,8 @@ placed in a new directory whose name is chosen as the first domain name from
 the certificate, or the first IP address if no domain names are present. It
 will not overwrite existing keys or certificates.
 
+The certificate will have a validity of 90 years.
+
 # Installation
 
 First, install the [Go tools](https://golang.org/dl/) and set up your `$GOPATH`.
