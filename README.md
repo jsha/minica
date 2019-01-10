@@ -24,6 +24,17 @@ Then, run:
 
 `go get github.com/jsha/minica`
 
+When using Go 1.11 or newer you don't need a $GOPATH and can instead do the
+following:
+
+```
+cd /ANY/PATH
+git clone github.com/jsha/minica
+go build
+## or
+# go install
+```
+
 # Example usage
 
 ```
