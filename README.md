@@ -7,6 +7,9 @@ for generating certificates for RPC systems or microservices.
 On first run, minica will generate a keypair and a root certificate in the
 current directory, and will reuse that same keypair and root certificate
 unless they are deleted.
+Private key file can be encrypted/password protected.
+This automatic creation can be disabled to avoid creation of certificates not
+signed by the expected key (after distribution of the root certificate).
 
 On each run, minica will generate a new keypair and sign an end-entity (leaf)
 certificate for that keypair. The certificate will contain a list of DNS names

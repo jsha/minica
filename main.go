@@ -13,14 +13,17 @@ import (
 	"encoding/pem"
 	"flag"
 	"fmt"
+	"golang.org/x/crypto/ssh/terminal"
 	"io/ioutil"
 	"log"
 	"math"
 	"math/big"
 	"net"
 	"os"
+	"os/signal"
 	"regexp"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -36,20 +39,113 @@ type issuer struct {
 	cert *x509.Certificate
 }
 
-func getIssuer(keyFile, certFile string) (*issuer, error) {
+const (
+	envPrivkeyPass      = "MINICA_KEY_PASSWORD"
+	defaultCaNamePrefix = "minica"
+)
+
+type issuerCreationMode int
+
+const (
+	_ issuerCreationMode = iota //previous default => doCreate
+	createAndEncrypt
+	noAutoCreate
+)
+
+type autoCreateOpts struct {
+	mode       issuerCreationMode
+	namePrefix *string
+	createOnly bool
+}
+
+// don't ask pass when reloading newly create key.
+var keyPass []byte
+
+func getPassword(confirm bool) (password []byte, err error) {
+	err = nil
+	if keyPass != nil {
+		password = keyPass
+		return
+	}
+	fromEnv, isSet := os.LookupEnv(envPrivkeyPass)
+	if isSet {
+		fmt.Println("Using password from environment.")
+		password = []byte(fromEnv)
+		return
+	}
+	//ensures that echo is turned back on in case of interrupt
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
+	previousState, err := terminal.GetState(syscall.Stdin)
+	go func() {
+		e := <-sigs
+		if e != nil {
+			fmt.Printf("Exiting on %v\n", e)
+			_ = terminal.Restore(syscall.Stdout, previousState)
+			os.Exit(1)
+		}
+	}()
+	defer func() {
+		close(sigs)
+	}()
+
+	fmt.Println("Please enter Private Key Password.")
+	passwordFirst, err := terminal.ReadPassword(syscall.Stdin)
+	if err != nil {
+		return
+	}
+	if !confirm {
+		password = passwordFirst
+		return
+	}
+	fmt.Println("Please confirm Private Key Password.")
+	passwordConfirmation, err := terminal.ReadPassword(syscall.Stdin)
+	if err != nil {
+		return
+	}
+	if bytes.Compare(passwordFirst, passwordConfirmation) == 0 {
+		password = passwordFirst
+		keyPass = password
+		return
+	}
+	err = fmt.Errorf("passwords do not match")
+	return
+}
+func getIssuer(keyFile, certFile string, acOpts autoCreateOpts) (*issuer, error) {
 	keyContents, keyErr := ioutil.ReadFile(keyFile)
 	certContents, certErr := ioutil.ReadFile(certFile)
-	if os.IsNotExist(keyErr) && os.IsNotExist(certErr) {
-		err := makeIssuer(keyFile, certFile)
-		if err != nil {
-			return nil, err
+	keyFileIsMissing := os.IsNotExist(keyErr)
+	certFileIsMissing := os.IsNotExist(certErr)
+	if keyFileIsMissing && certFileIsMissing {
+		if acOpts.mode != noAutoCreate {
+			err := makeIssuer(keyFile, certFile, acOpts)
+			if err != nil {
+				return nil, err
+			}
+			acOpts.mode = noAutoCreate
+			acOpts.namePrefix = nil
+			acOpts.createOnly = false
+			return getIssuer(keyFile, certFile, acOpts)
 		}
-		return getIssuer(keyFile, certFile)
-	} else if keyErr != nil {
-		return nil, fmt.Errorf("%s (but %s exists)", keyErr, certFile)
-	} else if certErr != nil {
-		return nil, fmt.Errorf("%s (but %s exists)", certErr, keyFile)
+		return nil, fmt.Errorf("%s and %s do not exist and auto-create is turned off", keyFile, certFile)
 	}
+	if certFileIsMissing {
+		return nil, fmt.Errorf("%s does not exist", certFile)
+	}
+	if keyFileIsMissing {
+		return nil, fmt.Errorf("%s does not exist", keyFile)
+	}
+	if keyErr != nil {
+		return nil, fmt.Errorf("%s (but %s exists)", keyErr, keyFile)
+	}
+	if certErr != nil {
+		return nil, fmt.Errorf("%s (but %s exists)", certErr, certFile)
+	}
+	if acOpts.createOnly {
+		return nil, fmt.Errorf("root CA already exists. It can't be created")
+	}
+
+	warnAboutUselessCreateOpts(&acOpts, "private key already exists")
 	key, err := readPrivateKey(keyContents)
 	if err != nil {
 		return nil, fmt.Errorf("reading private key from %s: %s", keyFile, err)
@@ -77,6 +173,26 @@ func readPrivateKey(keyContents []byte) (crypto.Signer, error) {
 	} else if block.Type != "RSA PRIVATE KEY" && block.Type != "ECDSA PRIVATE KEY" {
 		return nil, fmt.Errorf("incorrect PEM type %s", block.Type)
 	}
+	if x509.IsEncryptedPEMBlock(block) {
+		if keyPass == nil {
+			fmt.Println("Private Key is encrypted.")
+		}
+
+		password, err := getPassword(false)
+		if err != nil {
+			return nil, err
+		}
+
+		pemBytes, err := x509.DecryptPEMBlock(block, password)
+		if err != nil {
+			return nil, err
+		}
+
+		block = &pem.Block{
+			Bytes: pemBytes,
+			Type:  block.Type,
+		}
+	}
 	return x509.ParsePKCS1PrivateKey(block.Bytes)
 }
 
@@ -90,19 +206,25 @@ func readCert(certContents []byte) (*x509.Certificate, error) {
 	return x509.ParseCertificate(block.Bytes)
 }
 
-func makeIssuer(keyFile, certFile string) error {
-	key, err := makeKey(keyFile)
+func makeIssuer(keyFile, certFile string, acOpts autoCreateOpts) error {
+	encryptKey := acOpts.mode == createAndEncrypt
+	if encryptKey {
+		fmt.Println("Creating encrypted root CA...")
+	} else {
+		fmt.Println("Creating root CA...")
+	}
+	key, err := makeKey(keyFile, encryptKey)
 	if err != nil {
 		return err
 	}
-	_, err = makeRootCert(key, certFile)
+	_, err = makeRootCert(key, certFile, *acOpts.namePrefix)
 	if err != nil {
 		return err
 	}
 	return nil
 }
 
-func makeKey(filename string) (*rsa.PrivateKey, error) {
+func makeKey(filename string, encrypt bool) (*rsa.PrivateKey, error) {
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		return nil, err
@@ -111,22 +233,37 @@ func makeKey(filename string) (*rsa.PrivateKey, error) {
 	if err != nil {
 		return nil, err
 	}
+	var password []byte
+	if encrypt {
+		password, err = getPassword(true)
+		if err != nil {
+			return nil, err
+		}
+	}
 	file, err := os.OpenFile(filename, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
 	if err != nil {
 		return nil, err
 	}
 	defer file.Close()
-	err = pem.Encode(file, &pem.Block{
+	block := &pem.Block{
 		Type:  "RSA PRIVATE KEY",
 		Bytes: der,
-	})
+	}
+	if encrypt {
+		block, err = x509.EncryptPEMBlock(rand.Reader, block.Type, block.Bytes, password, x509.PEMCipherAES256)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	err = pem.Encode(file, block)
 	if err != nil {
 		return nil, err
 	}
 	return key, nil
 }
 
-func makeRootCert(key crypto.Signer, filename string) (*x509.Certificate, error) {
+func makeRootCert(key crypto.Signer, filename string, caNamePrefix string) (*x509.Certificate, error) {
 	serial, err := rand.Int(rand.Reader, big.NewInt(math.MaxInt64))
 	if err != nil {
 		return nil, err
@@ -137,7 +274,7 @@ func makeRootCert(key crypto.Signer, filename string) (*x509.Certificate, error)
 	}
 	template := &x509.Certificate{
 		Subject: pkix.Name{
-			CommonName: "minica root ca " + hex.EncodeToString(serial.Bytes()[:3]),
+			CommonName: fmt.Sprintf("%s root ca %s", caNamePrefix, hex.EncodeToString(serial.Bytes()[:3])),
 		},
 		SerialNumber: serial,
 		NotBefore:    time.Now(),
@@ -227,7 +364,7 @@ func sign(iss *issuer, domains []string, ipAddresses []string) (*x509.Certificat
 	if err != nil && !os.IsExist(err) {
 		return nil, err
 	}
-	key, err := makeKey(fmt.Sprintf("%s/key.pem", cnFolder))
+	key, err := makeKey(fmt.Sprintf("%s/key.pem", cnFolder), false)
 	if err != nil {
 		return nil, err
 	}
@@ -285,6 +422,10 @@ func main2() error {
 	var caCert = flag.String("ca-cert", "minica.pem", "Root certificate filename, PEM encoded.")
 	var domains = flag.String("domains", "", "Comma separated domain names to include as Server Alternative Names.")
 	var ipAddresses = flag.String("ip-addresses", "", "Comma separated IP addresses to include as Server Alternative Names.")
+	var caNamePrefix = flag.String("ca-name", defaultCaNamePrefix, "Prefix for name of Root CA")
+	var disableAutoCreate = flag.Bool("no-auto", false, "Prevent automatic creation of root CA")
+	var encryptCAKey = flag.Bool("encrypt-ca-key", false, fmt.Sprintf("Encrypt root CA private key (will ask password or use %s from env)", envPrivkeyPass))
+	var rootCAOnly = flag.Bool("root-ca-only", false, "Only create root CA (no certificates)")
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage of %s:\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, `
@@ -296,7 +437,10 @@ for generating certificates for RPC systems or microservices.
 
 On first run, minica will generate a keypair and a root certificate in the
 current directory, and will reuse that same keypair and root certificate
-unless they are deleted.
+unless they are deleted. 
+Private key file can be encrypted/password protected.
+This automatic creation can be disabled to avoid creation of certificates not
+signed by the expected key (after distribution of the root certificate).
 
 On each run, minica will generate a new keypair and sign an end-entity (leaf)
 certificate for that keypair. The certificate will contain a list of DNS names
@@ -305,37 +449,75 @@ placed in a new directory whose name is chosen as the first domain name from
 the certificate, or the first IP address if no domain names are present. It
 will not overwrite existing keys or certificates.
 
+The certificate will have a validity of 90 years.
+
 `)
 		flag.PrintDefaults()
 	}
 	flag.Parse()
-	if *domains == "" && *ipAddresses == "" {
-		flag.Usage()
-		os.Exit(1)
-	}
 	if len(flag.Args()) > 0 {
 		fmt.Printf("Extra arguments: %s (maybe there are spaces in your domain list?)\n", flag.Args())
 		os.Exit(1)
 	}
-	domainSlice := split(*domains)
-	domainRe := regexp.MustCompile("^[A-Za-z0-9.*-]+$")
-	for _, d := range domainSlice {
-		if !domainRe.MatchString(d) {
-			fmt.Printf("Invalid domain name %q\n", d)
+	var domainSlice []string
+	var ipSlice []string
+	if *rootCAOnly {
+		if *domains != "" || *ipAddresses != "" {
+			flag.Usage()
+			fmt.Println("\ndomains and ip-addresses are not compatible with rootCAonly option")
+			os.Exit(2)
+		}
+	} else {
+		if *domains == "" && *ipAddresses == "" {
+			flag.Usage()
+			fmt.Println("\nPlease provide domains or IP addresses")
 			os.Exit(1)
 		}
-	}
-	ipSlice := split(*ipAddresses)
-	for _, ip := range ipSlice {
-		if net.ParseIP(ip) == nil {
-			fmt.Printf("Invalid IP address %q\n", ip)
-			os.Exit(1)
+
+		domainSlice = split(*domains)
+		domainRe := regexp.MustCompile("^[A-Za-z0-9.*-]+$")
+		for _, d := range domainSlice {
+			if !domainRe.MatchString(d) {
+				fmt.Printf("Invalid domain name %q\n", d)
+				os.Exit(1)
+			}
+		}
+		ipSlice = split(*ipAddresses)
+		for _, ip := range ipSlice {
+			if net.ParseIP(ip) == nil {
+				fmt.Printf("Invalid IP address %q\n", ip)
+				os.Exit(1)
+			}
 		}
 	}
-	issuer, err := getIssuer(*caKey, *caCert)
+
+	acOpts := autoCreateOpts{
+		namePrefix: caNamePrefix,
+		createOnly: *rootCAOnly,
+	}
+	if *disableAutoCreate {
+		acOpts.mode = noAutoCreate
+		warnAboutUselessCreateOpts(&acOpts, "auto-creation is off")
+	} else if *encryptCAKey {
+		acOpts.mode = createAndEncrypt
+	}
+	issuer, err := getIssuer(*caKey, *caCert, acOpts)
 	if err != nil {
 		return err
 	}
+	if *rootCAOnly {
+		return nil
+	}
 	_, err = sign(issuer, domainSlice, ipSlice)
 	return err
+}
+
+func warnAboutUselessCreateOpts(opts *autoCreateOpts, reason string) {
+	if opts.mode == createAndEncrypt {
+		fmt.Printf("WARNING: encryption requested while %s. Flag will be ignored\n", reason)
+	}
+	if opts.namePrefix != nil && *opts.namePrefix != defaultCaNamePrefix {
+		fmt.Printf("WARNING: ca-name provided while %s. Flag will be ignored\n", reason)
+		opts.namePrefix = nil
+	}
 }
