@@ -5,8 +5,10 @@ import (
 	"crypto"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/sha1"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/asn1"
 	"encoding/hex"
 	"encoding/pem"
 	"flag"
@@ -129,6 +131,10 @@ func makeRootCert(key crypto.Signer, filename string) (*x509.Certificate, error)
 	if err != nil {
 		return nil, err
 	}
+	skid, err := calculateSKID(key.Public())
+	if err != nil {
+		return nil, err
+	}
 	template := &x509.Certificate{
 		Subject: pkix.Name{
 			CommonName: "minica root ca " + hex.EncodeToString(serial.Bytes()[:3]),
@@ -137,11 +143,13 @@ func makeRootCert(key crypto.Signer, filename string) (*x509.Certificate, error)
 		NotBefore:    time.Now(),
 		NotAfter:     time.Now().AddDate(100, 0, 0),
 
+		SubjectKeyId:          skid,
+		AuthorityKeyId:        skid,
 		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
 		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
 		BasicConstraintsValid: true,
-		IsCA:           true,
-		MaxPathLenZero: true,
+		IsCA:                  true,
+		MaxPathLenZero:        true,
 	}
 
 	der, err := x509.CreateCertificate(rand.Reader, template, template, key.Public(), key)
@@ -187,6 +195,24 @@ func publicKeysEqual(a, b interface{}) (bool, error) {
 	return bytes.Compare(aBytes, bBytes) == 0, nil
 }
 
+func calculateSKID(pubKey crypto.PublicKey) ([]byte, error) {
+	spkiASN1, err := x509.MarshalPKIXPublicKey(pubKey)
+	if err != nil {
+		return nil, err
+	}
+
+	var spki struct {
+		Algorithm        pkix.AlgorithmIdentifier
+		SubjectPublicKey asn1.BitString
+	}
+	_, err = asn1.Unmarshal(spkiASN1, &spki)
+	if err != nil {
+		return nil, err
+	}
+	skid := sha1.Sum(spki.SubjectPublicKey.Bytes)
+	return skid[:], nil
+}
+
 func sign(iss *issuer, domains []string, ipAddresses []string) (*x509.Certificate, error) {
 	var cn string
 	if len(domains) > 0 {
@@ -226,7 +252,7 @@ func sign(iss *issuer, domains []string, ipAddresses []string) (*x509.Certificat
 		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
 		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
 		BasicConstraintsValid: true,
-		IsCA: false,
+		IsCA:                  false,
 	}
 	der, err := x509.CreateCertificate(rand.Reader, template, iss.cert, key.Public(), iss.key)
 	if err != nil {
