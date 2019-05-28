@@ -29,7 +29,7 @@ following:
 
 ```
 cd /ANY/PATH
-git clone github.com/jsha/minica
+git clone https://github.com/jsha/minica.git
 go build
 ## or
 # go install
