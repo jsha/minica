@@ -35,6 +35,20 @@ go build
 # go install
 ```
 
+## Alternative Installation: Using Homebrew
+
+If you have the [Homebrew package manager](https://brew.sh) for Mac OSX (or Linux), you can install `minica` by following these (script) steps:
+
+```bash
+# In your Terminal...
+
+# Step 1: install golang (>= )
+brew install golang
+
+# Step 2: Install minica (>= 1.13)
+brew install minica
+```
+
 # Example usage
 
 ```
