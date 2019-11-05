@@ -251,7 +251,11 @@ func sign(iss *issuer, domains []string, ipAddresses []string) (*x509.Certificat
 		},
 		SerialNumber: serial,
 		NotBefore:    time.Now(),
-		NotAfter:     time.Now().AddDate(90, 0, 0),
+		// Set the validity period to 2 years and 30 days, to satisfy the iOS and
+		// macOS requirements that all server certificates must have validity
+		// shorter than 825 days:
+		// https://derflounder.wordpress.com/2019/06/06/new-tls-security-requirements-for-ios-13-and-macos-catalina-10-15/
+		NotAfter: time.Now().AddDate(2, 30, 0),
 
 		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
 		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
