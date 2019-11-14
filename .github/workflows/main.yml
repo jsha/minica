@@ -1,0 +1,2 @@
+- name: Go Release Binary
+  uses: ngs/go-release.action@v1.0.2
