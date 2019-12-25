@@ -36,15 +36,15 @@ type issuer struct {
 	cert *x509.Certificate
 }
 
-func getIssuer(keyFile, certFile string) (*issuer, error) {
+func getIssuer(keyFile, certFile string, keySize int) (*issuer, error) {
 	keyContents, keyErr := ioutil.ReadFile(keyFile)
 	certContents, certErr := ioutil.ReadFile(certFile)
 	if os.IsNotExist(keyErr) && os.IsNotExist(certErr) {
-		err := makeIssuer(keyFile, certFile)
+		err := makeIssuer(keyFile, certFile, keySize)
 		if err != nil {
 			return nil, err
 		}
-		return getIssuer(keyFile, certFile)
+		return getIssuer(keyFile, certFile, keySize)
 	} else if keyErr != nil {
 		return nil, fmt.Errorf("%s (but %s exists)", keyErr, certFile)
 	} else if certErr != nil {
@@ -90,8 +90,8 @@ func readCert(certContents []byte) (*x509.Certificate, error) {
 	return x509.ParseCertificate(block.Bytes)
 }
 
-func makeIssuer(keyFile, certFile string) error {
-	key, err := makeKey(keyFile)
+func makeIssuer(keyFile, certFile string, keySize int) error {
+	key, err := makeKey(keyFile, keySize)
 	if err != nil {
 		return err
 	}
@@ -102,8 +102,8 @@ func makeIssuer(keyFile, certFile string) error {
 	return nil
 }
 
-func makeKey(filename string) (*rsa.PrivateKey, error) {
-	key, err := rsa.GenerateKey(rand.Reader, 2048)
+func makeKey(filename string, keySize int) (*rsa.PrivateKey, error) {
+	key, err := rsa.GenerateKey(rand.Reader, keySize)
 	if err != nil {
 		return nil, err
 	}
@@ -213,7 +213,7 @@ func calculateSKID(pubKey crypto.PublicKey) ([]byte, error) {
 	return skid[:], nil
 }
 
-func sign(iss *issuer, domains []string, ipAddresses []string) (*x509.Certificate, error) {
+func sign(iss *issuer, domains []string, ipAddresses []string, keySize int) (*x509.Certificate, error) {
 	var cn string
 	if len(domains) > 0 {
 		cn = domains[0]
@@ -227,7 +227,7 @@ func sign(iss *issuer, domains []string, ipAddresses []string) (*x509.Certificat
 	if err != nil && !os.IsExist(err) {
 		return nil, err
 	}
-	key, err := makeKey(fmt.Sprintf("%s/key.pem", cnFolder))
+	key, err := makeKey(fmt.Sprintf("%s/key.pem", cnFolder), keySize)
 	if err != nil {
 		return nil, err
 	}
@@ -289,6 +289,7 @@ func main2() error {
 	var caCert = flag.String("ca-cert", "minica.pem", "Root certificate filename, PEM encoded.")
 	var domains = flag.String("domains", "", "Comma separated domain names to include as Server Alternative Names.")
 	var ipAddresses = flag.String("ip-addresses", "", "Comma separated IP addresses to include as Server Alternative Names.")
+	var keySize = flag.Int("keySize", 2048, "Key size in bits")
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage of %s:\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, `
@@ -336,10 +337,10 @@ will not overwrite existing keys or certificates.
 			os.Exit(1)
 		}
 	}
-	issuer, err := getIssuer(*caKey, *caCert)
+	issuer, err := getIssuer(*caKey, *caCert, *keySize)
 	if err != nil {
 		return err
 	}
-	_, err = sign(issuer, domainSlice, ipSlice)
+	_, err = sign(issuer, domainSlice, ipSlice, *keySize)
 	return err
 }
