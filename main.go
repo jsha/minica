@@ -20,6 +20,7 @@ import (
 	"net"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -36,15 +37,15 @@ type issuer struct {
 	cert *x509.Certificate
 }
 
-func getIssuer(keyFile, certFile, keyAlgorithm string) (*issuer, error) {
+func getIssuer(keyFile, certFile, keyAlgorithm string, keySize int) (*issuer, error) {
 	keyContents, keyErr := ioutil.ReadFile(keyFile)
 	certContents, certErr := ioutil.ReadFile(certFile)
 	if os.IsNotExist(keyErr) && os.IsNotExist(certErr) {
-		err := makeIssuer(keyFile, certFile, keyAlgorithm)
+		err := makeIssuer(keyFile, certFile, keyAlgorithm, keySize)
 		if err != nil {
 			return nil, err
 		}
-		return getIssuer(keyFile, certFile, keyAlgorithm)
+		return getIssuer(keyFile, certFile, keyAlgorithm, keySize)
 	} else if keyErr != nil {
 		return nil, fmt.Errorf("%s (but %s exists)", keyErr, certFile)
 	} else if certErr != nil {
@@ -96,8 +97,8 @@ func readCert(certContents []byte) (*x509.Certificate, error) {
 	return x509.ParseCertificate(block.Bytes)
 }
 
-func makeIssuer(keyFile, certFile, keyAlgorithm string) error {
-	key, err := makeKey(keyFile, keyAlgorithm)
+func makeIssuer(keyFile, certFile, keyAlgorithm string, keySize int) error {
+	key, err := makeKey(keyFile, keyAlgorithm, keySize)
 	if err != nil {
 		return err
 	}
@@ -108,8 +109,8 @@ func makeIssuer(keyFile, certFile, keyAlgorithm string) error {
 	return nil
 }
 
-func makeKey(filename, keyAlgorithm string) (*rsa.PrivateKey, error) {
-	key, err := rsa.GenerateKey(rand.Reader, 2048)
+func makeKey(filename, keyAlgorithm string, keySize int) (*rsa.PrivateKey, error) {
+	key, err := rsa.GenerateKey(rand.Reader, keySize)
 	if err != nil {
 		return nil, err
 	}
@@ -228,7 +229,7 @@ func calculateSKID(pubKey crypto.PublicKey) ([]byte, error) {
 	return skid[:], nil
 }
 
-func sign(iss *issuer, domains []string, ipAddresses []string, keyAlgorithm string) (*x509.Certificate, error) {
+func sign(iss *issuer, domains []string, ipAddresses []string, keyAlgorithm string, keySize int) (*x509.Certificate, error) {
 	var cn string
 	if len(domains) > 0 {
 		cn = domains[0]
@@ -242,7 +243,7 @@ func sign(iss *issuer, domains []string, ipAddresses []string, keyAlgorithm stri
 	if err != nil && !os.IsExist(err) {
 		return nil, err
 	}
-	key, err := makeKey(fmt.Sprintf("%s/key.pem", cnFolder), keyAlgorithm)
+	key, err := makeKey(fmt.Sprintf("%s/key.pem", cnFolder), keyAlgorithm, keySize)
 	if err != nil {
 		return nil, err
 	}
@@ -305,6 +306,7 @@ func main2() error {
 	var domains = flag.String("domains", "", "Comma separated domain names to include as Server Alternative Names.")
 	var ipAddresses = flag.String("ip-addresses", "", "Comma separated IP addresses to include as Server Alternative Names.")
 	var keyAlgorithm = flag.String("key-algo", "PKCS1", "Algorithm to be used for private keys. PKCS1 or PKCS8. Default PKCS1")
+	var keySize = flag.String("key-size", "2048", "Size of the key . Default 2048")
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage of %s:\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, `
@@ -352,14 +354,23 @@ will not overwrite existing keys or certificates.
 			os.Exit(1)
 		}
 	}
-	if !(*keyAlgorithm == "PKCS1" || *keyAlgorithm == "PKCS8") {
+	if *keyAlgorithm != "PKCS1" || *keyAlgorithm != "PKCS8" {
 		fmt.Printf("Invalid key algorithm. Only allowed values are %q or %q", "PKCS1", "PKCS8")
 		os.Exit(1)
 	}
-	issuer, err := getIssuer(*caKey, *caCert, *keyAlgorithm)
+	n, err := strconv.ParseInt(*keySize, 10, 0)
+	if err == nil {
+		fmt.Printf("Please use int size for key. Found %d of type %T", n, n)
+		os.Exit(1)
+	}
+	intKeySize, err := strconv.Atoi(*keySize)
 	if err != nil {
 		return err
 	}
-	_, err = sign(issuer, domainSlice, ipSlice, *keyAlgorithm)
+	issuer, err := getIssuer(*caKey, *caCert, *keyAlgorithm, intKeySize)
+	if err != nil {
+		return err
+	}
+	_, err = sign(issuer, domainSlice, ipSlice, *keyAlgorithm, intKeySize)
 	return err
 }
