@@ -36,15 +36,15 @@ type issuer struct {
 	cert *x509.Certificate
 }
 
-func getIssuer(keyFile, certFile string) (*issuer, error) {
+func getIssuer(keyFile, certFile, commonName string) (*issuer, error) {
 	keyContents, keyErr := ioutil.ReadFile(keyFile)
 	certContents, certErr := ioutil.ReadFile(certFile)
 	if os.IsNotExist(keyErr) && os.IsNotExist(certErr) {
-		err := makeIssuer(keyFile, certFile)
+		err := makeIssuer(keyFile, certFile, commonName)
 		if err != nil {
 			return nil, err
 		}
-		return getIssuer(keyFile, certFile)
+		return getIssuer(keyFile, certFile, commonName)
 	} else if keyErr != nil {
 		return nil, fmt.Errorf("%s (but %s exists)", keyErr, certFile)
 	} else if certErr != nil {
@@ -90,12 +90,12 @@ func readCert(certContents []byte) (*x509.Certificate, error) {
 	return x509.ParseCertificate(block.Bytes)
 }
 
-func makeIssuer(keyFile, certFile string) error {
+func makeIssuer(keyFile, certFile, commonName string) error {
 	key, err := makeKey(keyFile)
 	if err != nil {
 		return err
 	}
-	_, err = makeRootCert(key, certFile)
+	_, err = makeRootCert(key, certFile, commonName)
 	if err != nil {
 		return err
 	}
@@ -126,7 +126,7 @@ func makeKey(filename string) (*rsa.PrivateKey, error) {
 	return key, nil
 }
 
-func makeRootCert(key crypto.Signer, filename string) (*x509.Certificate, error) {
+func makeRootCert(key crypto.Signer, filename, commonName string) (*x509.Certificate, error) {
 	serial, err := rand.Int(rand.Reader, big.NewInt(math.MaxInt64))
 	if err != nil {
 		return nil, err
@@ -135,9 +135,12 @@ func makeRootCert(key crypto.Signer, filename string) (*x509.Certificate, error)
 	if err != nil {
 		return nil, err
 	}
+	if commonName == "" {
+		commonName = "minica root ca " + hex.EncodeToString(serial.Bytes()[:3])
+	}
 	template := &x509.Certificate{
 		Subject: pkix.Name{
-			CommonName: "minica root ca " + hex.EncodeToString(serial.Bytes()[:3]),
+			CommonName: commonName,
 		},
 		SerialNumber: serial,
 		NotBefore:    time.Now(),
@@ -287,6 +290,7 @@ func split(s string) (results []string) {
 func main2() error {
 	var caKey = flag.String("ca-key", "minica-key.pem", "Root private key filename, PEM encoded.")
 	var caCert = flag.String("ca-cert", "minica.pem", "Root certificate filename, PEM encoded.")
+	var caCommonName = flag.String("ca-cn", "", "Root certificate CommonName. Only used if root certicate needs to be created.")
 	var domains = flag.String("domains", "", "Comma separated domain names to include as Server Alternative Names.")
 	var ipAddresses = flag.String("ip-addresses", "", "Comma separated IP addresses to include as Server Alternative Names.")
 	flag.Usage = func() {
@@ -336,7 +340,7 @@ will not overwrite existing keys or certificates.
 			os.Exit(1)
 		}
 	}
-	issuer, err := getIssuer(*caKey, *caCert)
+	issuer, err := getIssuer(*caKey, *caCert, *caCommonName)
 	if err != nil {
 		return err
 	}
