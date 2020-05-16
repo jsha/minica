@@ -24,6 +24,9 @@ import (
 	"time"
 )
 
+var version string = "DEV"
+var date string
+
 func main() {
 	err := main2()
 	if err != nil {
@@ -310,6 +313,7 @@ the certificate, or the first IP address if no domain names are present. It
 will not overwrite existing keys or certificates.
 
 `)
+		fmt.Fprintf(os.Stderr, "version %v (built on %v)\n\n", version, date)
 		flag.PrintDefaults()
 	}
 	flag.Parse()
