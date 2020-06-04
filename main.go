@@ -239,6 +239,13 @@ func sign(iss *issuer, domains []string, ipAddresses []string) (*x509.Certificat
 	if err != nil {
 		return nil, err
 	}
+	extensions := []pkix.Extension{
+		{
+			Id:       asn1.ObjectIdentifier{1, 3, 6, 1, 4, 1, 11129, 2, 4, 3},
+			Critical: true,
+			Value:    []byte{5, 0},
+		},
+	}
 	template := &x509.Certificate{
 		DNSNames:    domains,
 		IPAddresses: parsedIPs,
@@ -257,6 +264,7 @@ func sign(iss *issuer, domains []string, ipAddresses []string) (*x509.Certificat
 		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
 		BasicConstraintsValid: true,
 		IsCA:                  false,
+		ExtraExtensions:       extensions,
 	}
 	der, err := x509.CreateCertificate(rand.Reader, template, iss.cert, key.Public(), iss.key)
 	if err != nil {
