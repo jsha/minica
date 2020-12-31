@@ -1,0 +1,9 @@
+FROM debian:buster
+
+RUN apt-get update -y && \
+    apt-get install --no-install-recommends -y \
+      minica curl ca-certificates openssl
+
+WORKDIR /test
+COPY tests.sh .
+RUN ./tests.sh
