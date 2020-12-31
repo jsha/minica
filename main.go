@@ -313,15 +313,11 @@ will not overwrite existing keys or certificates.
 		flag.PrintDefaults()
 	}
 	flag.Parse()
-	if *domains == "" && *ipAddresses == "" {
+	if flag.NArg() == 0 && *domains == "" && *ipAddresses == "" {
 		flag.Usage()
 		os.Exit(1)
 	}
-	if len(flag.Args()) > 0 {
-		fmt.Printf("Extra arguments: %s (maybe there are spaces in your domain list?)\n", flag.Args())
-		os.Exit(1)
-	}
-	domainSlice := split(*domains)
+	domainSlice := append(split(*domains), (flag.Args())...)
 	domainRe := regexp.MustCompile("^[A-Za-z0-9.*-]+$")
 	for _, d := range domainSlice {
 		if !domainRe.MatchString(d) {
