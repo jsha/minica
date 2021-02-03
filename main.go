@@ -74,7 +74,11 @@ func readPrivateKey(keyContents []byte) (crypto.Signer, error) {
 	block, _ := pem.Decode(keyContents)
 	if block == nil {
 		return nil, fmt.Errorf("no PEM found")
-	} else if block.Type != "RSA PRIVATE KEY" && block.Type != "ECDSA PRIVATE KEY" {
+	} else if block.Type == "RSA PRIVATE KEY" {
+		return x509.ParsePKCS1PrivateKey(block.Bytes)
+	} else if block.Type == "EC PRIVATE KEY" || block.Type == "ECDSA PRIVATE KEY" {
+		return x509.ParseECPrivateKey(block.Bytes)
+	} else {
 		return nil, fmt.Errorf("incorrect PEM type %s", block.Type)
 	}
 	return x509.ParsePKCS1PrivateKey(block.Bytes)
