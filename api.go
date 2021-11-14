@@ -18,3 +18,16 @@ func generateCertificate(domain *C.char) C.int {
 	}
 	return 0
 }
+
+//export generateIPCertificate
+func generateIPCertificate(ipAddress *C.char) C.int {
+	iss, err := certutils.GetIssuer("minica-key.pem", "minica.pem")
+	if err != nil {
+		return 1
+	}
+	_, err = certutils.Sign(iss, []string{}, []string{C.GoString(ipAddress)})
+	if err != nil {
+		return 2
+	}
+	return 0
+}
