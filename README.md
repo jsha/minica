@@ -47,3 +47,10 @@ $ minica --domains foo.com
 # Wildcard
 $ minica --domains '*.foo.com'
 ```
+
+For compatibility with another (unaffiliated) tool of the same name, domains
+can also be specified as final arguments:
+
+```
+minica foo.com
+```
