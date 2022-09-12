@@ -22,7 +22,7 @@ The certificate will have a validity of 2 years and 30 days.
 First, install the [Go tools](https://golang.org/dl/) and set up your `$GOPATH`.
 Then, run:
 
-`go get github.com/jsha/minica`
+`go install github.com/jsha/minica@latest`
 
 When using Go 1.11 or newer you don't need a $GOPATH and can instead do the
 following:
@@ -35,10 +35,15 @@ go build
 # go install
 ```
 
+Mac OS users could alternatively use Homebrew: `brew install minica`
+
 # Example usage
 
 ```
 # Generate a root key and cert in minica-key.pem, and minica.pem, then
 # generate and sign an end-entity key and cert, storing them in ./foo.com/
 $ minica --domains foo.com
+
+# Wildcard
+$ minica --domains '*.foo.com'
 ```
