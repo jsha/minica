@@ -348,7 +348,7 @@ will not overwrite existing keys or certificates.
 	alg := x509.RSA
 	if strings.ToLower(*caAlg) == "ecdsa" {
 		alg = x509.ECDSA
-	} else if strings.ToLower(*caCert) != "rsa" {
+	} else if strings.ToLower(*caAlg) != "rsa" {
 		fmt.Printf("Unrecognized algorithm: %s (use RSA or ECDSA)\n", *caAlg)
 		os.Exit(1)
 	}
