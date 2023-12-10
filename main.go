@@ -240,7 +240,7 @@ func calculateSKID(pubKey crypto.PublicKey) ([]byte, error) {
 	return skid[:], nil
 }
 
-func sign(iss *issuer, domains []string, ipAddresses []string) (*x509.Certificate, error) {
+func sign(iss *issuer, domains []string, ipAddresses []string, noValidityLimit bool) (*x509.Certificate, error) {
 	var cn string
 	if len(domains) > 0 {
 		cn = domains[0]
@@ -266,6 +266,15 @@ func sign(iss *issuer, domains []string, ipAddresses []string) (*x509.Certificat
 	if err != nil {
 		return nil, err
 	}
+        notBefore := time.Now()
+        // Set the validity period to 2 years and 30 days, to satisfy the iOS and
+        // macOS requirements that all server certificates must have validity
+        // shorter than 825 days:
+        // https://derflounder.wordpress.com/2019/06/06/new-tls-security-requirements-for-ios-13-and-macos-catalina-10-15/
+        notAfter := notBefore.AddDate(2, 0, 30)
+        if noValidityLimit {
+            notAfter = notBefore.AddDate(100, 0, 0)
+        }
 	template := &x509.Certificate{
 		DNSNames:    domains,
 		IPAddresses: parsedIPs,
@@ -273,12 +282,8 @@ func sign(iss *issuer, domains []string, ipAddresses []string) (*x509.Certificat
 			CommonName: cn,
 		},
 		SerialNumber: serial,
-		NotBefore:    time.Now(),
-		// Set the validity period to 2 years and 30 days, to satisfy the iOS and
-		// macOS requirements that all server certificates must have validity
-		// shorter than 825 days:
-		// https://derflounder.wordpress.com/2019/06/06/new-tls-security-requirements-for-ios-13-and-macos-catalina-10-15/
-		NotAfter: time.Now().AddDate(2, 0, 30),
+		NotBefore:    notBefore,
+		NotAfter:     notAfter,
 
 		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
 		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
@@ -317,6 +322,7 @@ func main2() error {
 	var caAlg = flag.String("ca-alg", "rsa", "Root keypair algorithm: RSA or ECDSA. Only used if generating new.")
 	var domains = flag.String("domains", "", "Comma separated domain names to include as Server Alternative Names.")
 	var ipAddresses = flag.String("ip-addresses", "", "Comma separated IP addresses to include as Server Alternative Names.")
+        var macOSBeDamned = flag.Bool("macos-be-damned", false, "Ignore Apple's 2 year + 30 day certificate validity ceiling (use 100 years).")
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage of %s:\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, `
@@ -375,6 +381,6 @@ will not overwrite existing keys or certificates.
 	if err != nil {
 		return err
 	}
-	_, err = sign(issuer, domainSlice, ipSlice)
+	_, err = sign(issuer, domainSlice, ipSlice, *macOSBeDamned)
 	return err
 }
