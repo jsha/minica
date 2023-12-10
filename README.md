@@ -30,6 +30,7 @@ following:
 ```
 cd /ANY/PATH
 git clone https://github.com/jsha/minica.git
+cd minica
 go build
 ## or
 # go install
