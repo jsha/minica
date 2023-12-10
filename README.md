@@ -28,8 +28,8 @@ When using Go 1.11 or newer you don't need a $GOPATH and can instead do the
 following:
 
 ```
-cd /ANY/PATH
 git clone https://github.com/jsha/minica.git
+cd minica
 go build
 ## or
 # go install
