@@ -245,12 +245,12 @@ func sign(iss *issuer, domains []string, ipAddresses []net.IP, emails []string, 
 	var cn string
 	if len(domains) > 0 {
 		cn = domains[0]
-	} else if len(ipAddresses) > 0 {
-		cn = ipAddresses[0].String()
 	} else if len(emails) > 0 {
 		cn = emails[0]
 	} else if len(uris) > 0 {
 		cn = uris[0].String()
+	} else if len(ipAddresses) > 0 {
+		cn = ipAddresses[0].String()
 	} else {
 		return nil, fmt.Errorf("must specify at least one domain name or IP address")
 	}
