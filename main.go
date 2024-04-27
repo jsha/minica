@@ -15,10 +15,11 @@ import (
 	"encoding/pem"
 	"flag"
 	"fmt"
-	"io/ioutil"
 	"log"
 	"math"
 	"math/big"
+	"net/mail"
+	"net/url"
 	"net"
 	"os"
 	"regexp"
@@ -39,8 +40,8 @@ type issuer struct {
 }
 
 func getIssuer(keyFile, certFile string, alg x509.PublicKeyAlgorithm) (*issuer, error) {
-	keyContents, keyErr := ioutil.ReadFile(keyFile)
-	certContents, certErr := ioutil.ReadFile(certFile)
+	keyContents, keyErr := os.ReadFile(keyFile)
+	certContents, certErr := os.ReadFile(certFile)
 	if os.IsNotExist(keyErr) && os.IsNotExist(certErr) {
 		err := makeIssuer(keyFile, certFile, alg)
 		if err != nil {
@@ -240,12 +241,16 @@ func calculateSKID(pubKey crypto.PublicKey) ([]byte, error) {
 	return skid[:], nil
 }
 
-func sign(iss *issuer, domains []string, ipAddresses []string, alg x509.PublicKeyAlgorithm) (*x509.Certificate, error) {
+func sign(iss *issuer, domains []string, ipAddresses []net.IP, emails []string, uris []*url.URL, alg x509.PublicKeyAlgorithm) (*x509.Certificate, error) {
 	var cn string
 	if len(domains) > 0 {
 		cn = domains[0]
 	} else if len(ipAddresses) > 0 {
-		cn = ipAddresses[0]
+		cn = ipAddresses[0].String()
+	} else if len(emails) > 0 {
+		cn = emails[0]
+	} else if len(uris) > 0 {
+		cn = uris[0].String()
 	} else {
 		return nil, fmt.Errorf("must specify at least one domain name or IP address")
 	}
@@ -258,17 +263,15 @@ func sign(iss *issuer, domains []string, ipAddresses []string, alg x509.PublicKe
 	if err != nil {
 		return nil, err
 	}
-	parsedIPs, err := parseIPs(ipAddresses)
-	if err != nil {
-		return nil, err
-	}
 	serial, err := rand.Int(rand.Reader, big.NewInt(math.MaxInt64))
 	if err != nil {
 		return nil, err
 	}
 	template := &x509.Certificate{
 		DNSNames:    domains,
-		IPAddresses: parsedIPs,
+		IPAddresses: ipAddresses,
+		EmailAddresses: emails,
+		URIs: uris,
 		Subject: pkix.Name{
 			CommonName: cn,
 		},
@@ -315,7 +318,9 @@ func main2() error {
 	var caKey = flag.String("ca-key", "minica-key.pem", "Root private key filename, PEM encoded.")
 	var caCert = flag.String("ca-cert", "minica.pem", "Root certificate filename, PEM encoded.")
 	var caAlg = flag.String("ca-alg", "ecdsa", "Algorithm for any new keypairs: RSA or ECDSA.")
-	var domains = flag.String("domains", "", "Comma separated domain names to include as Server Alternative Names.")
+	var domains = flag.String("domains", "", "Comma separated domain names to include as Subject Alternative Names.")
+	var emails = flag.String("emails", "", "Comma separated email addresses to include as Subject Alternative Names.")
+	var uris = flag.String("uris", "", "Comma separated URIs to include as Subject Alternative Names.")
 	var ipAddresses = flag.String("ip-addresses", "", "Comma separated IP addresses to include as Server Alternative Names.")
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage of %s:\n", os.Args[0])
@@ -341,7 +346,7 @@ will not overwrite existing keys or certificates.
 		flag.PrintDefaults()
 	}
 	flag.Parse()
-	if *domains == "" && *ipAddresses == "" {
+	if *domains == "" && *ipAddresses == "" && *emails == "" {
 		flag.Usage()
 		os.Exit(1)
 	}
@@ -365,16 +370,29 @@ will not overwrite existing keys or certificates.
 		}
 	}
 	ipSlice := split(*ipAddresses)
-	for _, ip := range ipSlice {
-		if net.ParseIP(ip) == nil {
-			fmt.Printf("Invalid IP address %q\n", ip)
+	parsedIPs, err := parseIPs(ipSlice); if err != nil {
+		fmt.Println(err.Error())
+		os.Exit(1)
+	}
+	emailSlice := split(*emails)
+	for _, email := range emailSlice {
+		_, err := mail.ParseAddress(email); if err != nil {
+			fmt.Printf("Invalid email address %q\n%e\n", email, err)
 			os.Exit(1)
 		}
+	}
+	uriSlice := split(*uris)
+	parsedURIs := make([]*url.URL, 0, len(uriSlice))
+	for _, uri := range uriSlice {
+		parsedURI, err := url.Parse(uri); if err != nil {
+			fmt.Printf("Invalid URI %q\n%e\n", uri, err)
+		}
+		parsedURIs = append(parsedURIs, parsedURI)
 	}
 	issuer, err := getIssuer(*caKey, *caCert, alg)
 	if err != nil {
 		return err
 	}
-	_, err = sign(issuer, domainSlice, ipSlice, alg)
+	_, err = sign(issuer, domainSlice, parsedIPs, emailSlice, parsedURIs, alg)
 	return err
 }
