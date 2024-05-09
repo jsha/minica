@@ -240,7 +240,7 @@ func calculateSKID(pubKey crypto.PublicKey) ([]byte, error) {
 	return skid[:], nil
 }
 
-func sign(iss *issuer, domains []string, ipAddresses []string) (*x509.Certificate, error) {
+func sign(iss *issuer, domains []string, ipAddresses []string, alg x509.PublicKeyAlgorithm) (*x509.Certificate, error) {
 	var cn string
 	if len(domains) > 0 {
 		cn = domains[0]
@@ -254,7 +254,7 @@ func sign(iss *issuer, domains []string, ipAddresses []string) (*x509.Certificat
 	if err != nil && !os.IsExist(err) {
 		return nil, err
 	}
-	key, err := makeKey(fmt.Sprintf("%s/key.pem", cnFolder), x509.RSA)
+	key, err := makeKey(fmt.Sprintf("%s/key.pem", cnFolder), alg)
 	if err != nil {
 		return nil, err
 	}
@@ -314,7 +314,7 @@ func split(s string) (results []string) {
 func main2() error {
 	var caKey = flag.String("ca-key", "minica-key.pem", "Root private key filename, PEM encoded.")
 	var caCert = flag.String("ca-cert", "minica.pem", "Root certificate filename, PEM encoded.")
-	var caAlg = flag.String("ca-alg", "rsa", "Root keypair algorithm: RSA or ECDSA. Only used if generating new.")
+	var caAlg = flag.String("ca-alg", "ecdsa", "Algorithm for any new keypairs: RSA or ECDSA.")
 	var domains = flag.String("domains", "", "Comma separated domain names to include as Server Alternative Names.")
 	var ipAddresses = flag.String("ip-addresses", "", "Comma separated IP addresses to include as Server Alternative Names.")
 	flag.Usage = func() {
@@ -375,6 +375,6 @@ will not overwrite existing keys or certificates.
 	if err != nil {
 		return err
 	}
-	_, err = sign(issuer, domainSlice, ipSlice)
+	_, err = sign(issuer, domainSlice, ipSlice, alg)
 	return err
 }
