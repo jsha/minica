@@ -240,7 +240,7 @@ func calculateSKID(pubKey crypto.PublicKey) ([]byte, error) {
 	return skid[:], nil
 }
 
-func sign(iss *issuer, domains []string, ipAddresses []string, alg x509.PublicKeyAlgorithm) (*x509.Certificate, error) {
+func sign(iss *issuer, domains []string, ipAddresses []string, alg x509.PublicKeyAlgorithm, certValidity int) (*x509.Certificate, error) {
 	var cn string
 	if len(domains) > 0 {
 		cn = domains[0]
@@ -274,11 +274,7 @@ func sign(iss *issuer, domains []string, ipAddresses []string, alg x509.PublicKe
 		},
 		SerialNumber: serial,
 		NotBefore:    time.Now(),
-		// Set the validity period to 2 years and 30 days, to satisfy the iOS and
-		// macOS requirements that all server certificates must have validity
-		// shorter than 825 days:
-		// https://derflounder.wordpress.com/2019/06/06/new-tls-security-requirements-for-ios-13-and-macos-catalina-10-15/
-		NotAfter: time.Now().AddDate(2, 0, 30),
+		NotAfter: time.Now().AddDate(0, 0, certValidity),
 
 		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
 		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
@@ -317,6 +313,11 @@ func main2() error {
 	var caAlg = flag.String("ca-alg", "ecdsa", "Algorithm for any new keypairs: RSA or ECDSA.")
 	var domains = flag.String("domains", "", "Comma separated domain names to include as Server Alternative Names.")
 	var ipAddresses = flag.String("ip-addresses", "", "Comma separated IP addresses to include as Server Alternative Names.")
+	var certValidity = flag.Int("cert-validity", 760, "Validity for new certificates in days.")
+		// Set the default validity period to 760 days, to satisfy the iOS and
+		// macOS requirements that all server certificates must have validity
+		// shorter than 825 days:
+		// https://derflounder.wordpress.com/2019/06/06/new-tls-security-requirements-for-ios-13-and-macos-catalina-10-15/
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage of %s:\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, `
@@ -352,6 +353,10 @@ will not overwrite existing keys or certificates.
 		fmt.Printf("Unrecognized algorithm: %s (use RSA or ECDSA)\n", *caAlg)
 		os.Exit(1)
 	}
+	if *certValidity < 0 {
+		fmt.Printf("Invalid certificate validity.\n")
+		os.Exit(1)
+	}
 	if len(flag.Args()) > 0 {
 		fmt.Printf("Extra arguments: %s (maybe there are spaces in your domain list?)\n", flag.Args())
 		os.Exit(1)
@@ -375,6 +380,6 @@ will not overwrite existing keys or certificates.
 	if err != nil {
 		return err
 	}
-	_, err = sign(issuer, domainSlice, ipSlice, alg)
+	_, err = sign(issuer, domainSlice, ipSlice, alg, *certValidity)
 	return err
 }
