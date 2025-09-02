@@ -38,7 +38,7 @@ type issuer struct {
 	cert *x509.Certificate
 }
 
-func getIssuer(keyFile, certFile string, alg x509.PublicKeyAlgorithm) (*issuer, error) {
+func getIssuer(keyFile, certFile string, alg x509.PublicKeyAlgorithm, reuseKey bool) (*issuer, error) {
 	keyContents, keyErr := ioutil.ReadFile(keyFile)
 	certContents, certErr := ioutil.ReadFile(certFile)
 	if os.IsNotExist(keyErr) && os.IsNotExist(certErr) {
@@ -46,10 +46,21 @@ func getIssuer(keyFile, certFile string, alg x509.PublicKeyAlgorithm) (*issuer, 
 		if err != nil {
 			return nil, err
 		}
-		return getIssuer(keyFile, certFile, alg)
+		return getIssuer(keyFile, certFile, alg, false)
 	} else if keyErr != nil {
 		return nil, fmt.Errorf("%s (but %s exists)", keyErr, certFile)
 	} else if certErr != nil {
+		if reuseKey {
+			key, err := readPrivateKey(keyContents)
+			if err != nil {
+				return nil, fmt.Errorf("reading private key from %s: %s", keyFile, err)
+			}
+			_, err = makeRootCert(key, certFile)
+			if err != nil {
+				return nil, err
+			}
+			return getIssuer(keyFile, certFile, alg, false)
+		}
 		return nil, fmt.Errorf("%s (but %s exists)", certErr, keyFile)
 	}
 	key, err := readPrivateKey(keyContents)
@@ -240,7 +251,7 @@ func calculateSKID(pubKey crypto.PublicKey) ([]byte, error) {
 	return skid[:], nil
 }
 
-func sign(iss *issuer, domains []string, ipAddresses []string, alg x509.PublicKeyAlgorithm) (*x509.Certificate, error) {
+func sign(iss *issuer, domains []string, ipAddresses []string, alg x509.PublicKeyAlgorithm, reuseKey bool) (*x509.Certificate, error) {
 	var cn string
 	if len(domains) > 0 {
 		cn = domains[0]
@@ -254,9 +265,22 @@ func sign(iss *issuer, domains []string, ipAddresses []string, alg x509.PublicKe
 	if err != nil && !os.IsExist(err) {
 		return nil, err
 	}
-	key, err := makeKey(fmt.Sprintf("%s/key.pem", cnFolder), alg)
-	if err != nil {
-		return nil, err
+	var keyFile = fmt.Sprintf("%s/key.pem", cnFolder)
+	var key crypto.Signer
+	if reuseKey {
+		keyContents, keyErr := ioutil.ReadFile(keyFile)
+		if keyErr == nil {
+			key, err = readPrivateKey(keyContents)
+			if err != nil {
+				return nil, fmt.Errorf("reading private key from %s: %s", keyFile, err)
+			}
+		}
+	}
+	if key == nil {
+		key, err = makeKey(keyFile, alg)
+		if err != nil {
+			return nil, err
+		}
 	}
 	parsedIPs, err := parseIPs(ipAddresses)
 	if err != nil {
@@ -315,6 +339,7 @@ func main2() error {
 	var caKey = flag.String("ca-key", "minica-key.pem", "Root private key filename, PEM encoded.")
 	var caCert = flag.String("ca-cert", "minica.pem", "Root certificate filename, PEM encoded.")
 	var caAlg = flag.String("ca-alg", "ecdsa", "Algorithm for any new keypairs: RSA or ECDSA.")
+	var reuseKeys = flag.Bool("reuse-keys", false, "If only the key file exists, reuse it to generate the certificate")
 	var domains = flag.String("domains", "", "Comma separated domain names to include as Server Alternative Names.")
 	var ipAddresses = flag.String("ip-addresses", "", "Comma separated IP addresses to include as Server Alternative Names.")
 	flag.Usage = func() {
@@ -371,10 +396,10 @@ will not overwrite existing keys or certificates.
 			os.Exit(1)
 		}
 	}
-	issuer, err := getIssuer(*caKey, *caCert, alg)
+	issuer, err := getIssuer(*caKey, *caCert, alg, *reuseKeys)
 	if err != nil {
 		return err
 	}
-	_, err = sign(issuer, domainSlice, ipSlice, alg)
+	_, err = sign(issuer, domainSlice, ipSlice, alg, *reuseKeys)
 	return err
 }
