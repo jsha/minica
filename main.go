@@ -38,15 +38,15 @@ type issuer struct {
 	cert *x509.Certificate
 }
 
-func getIssuer(keyFile, certFile string, alg x509.PublicKeyAlgorithm, reuseKey bool) (*issuer, error) {
+func getIssuer(keyFile, certFile string, alg x509.PublicKeyAlgorithm, reuseKey bool, commonName string) (*issuer, error) {
 	keyContents, keyErr := ioutil.ReadFile(keyFile)
 	certContents, certErr := ioutil.ReadFile(certFile)
 	if os.IsNotExist(keyErr) && os.IsNotExist(certErr) {
-		err := makeIssuer(keyFile, certFile, alg)
+		err := makeIssuer(keyFile, certFile, alg, commonName)
 		if err != nil {
 			return nil, err
 		}
-		return getIssuer(keyFile, certFile, alg, false)
+		return getIssuer(keyFile, certFile, alg, false, commonName)
 	} else if keyErr != nil {
 		return nil, fmt.Errorf("%s (but %s exists)", keyErr, certFile)
 	} else if certErr != nil {
@@ -55,11 +55,11 @@ func getIssuer(keyFile, certFile string, alg x509.PublicKeyAlgorithm, reuseKey b
 			if err != nil {
 				return nil, fmt.Errorf("reading private key from %s: %s", keyFile, err)
 			}
-			_, err = makeRootCert(key, certFile)
+			_, err = makeRootCert(key, certFile, commonName)
 			if err != nil {
 				return nil, err
 			}
-			return getIssuer(keyFile, certFile, alg, false)
+			return getIssuer(keyFile, certFile, alg, false, commonName)
 		}
 		return nil, fmt.Errorf("%s (but %s exists)", certErr, keyFile)
 	}
@@ -118,12 +118,12 @@ func readCert(certContents []byte) (*x509.Certificate, error) {
 	return x509.ParseCertificate(block.Bytes)
 }
 
-func makeIssuer(keyFile, certFile string, alg x509.PublicKeyAlgorithm) error {
+func makeIssuer(keyFile, certFile string, alg x509.PublicKeyAlgorithm, commonName string) error {
 	key, err := makeKey(keyFile, alg)
 	if err != nil {
 		return err
 	}
-	_, err = makeRootCert(key, certFile)
+	_, err = makeRootCert(key, certFile, commonName)
 	if err != nil {
 		return err
 	}
@@ -164,7 +164,7 @@ func makeKey(filename string, alg x509.PublicKeyAlgorithm) (crypto.Signer, error
 	return key, nil
 }
 
-func makeRootCert(key crypto.Signer, filename string) (*x509.Certificate, error) {
+func makeRootCert(key crypto.Signer, filename, commonName string) (*x509.Certificate, error) {
 	serial, err := rand.Int(rand.Reader, big.NewInt(math.MaxInt64))
 	if err != nil {
 		return nil, err
@@ -175,7 +175,7 @@ func makeRootCert(key crypto.Signer, filename string) (*x509.Certificate, error)
 	}
 	template := &x509.Certificate{
 		Subject: pkix.Name{
-			CommonName: "minica root ca " + hex.EncodeToString(serial.Bytes()[:3]),
+			CommonName: commonName + " " + hex.EncodeToString(serial.Bytes()[:3]),
 		},
 		SerialNumber: serial,
 		NotBefore:    time.Now(),
@@ -342,6 +342,7 @@ func main2() error {
 	var reuseKeys = flag.Bool("reuse-keys", false, "If only the key file exists, reuse it to generate the certificate")
 	var domains = flag.String("domains", "", "Comma separated domain names to include as Server Alternative Names.")
 	var ipAddresses = flag.String("ip-addresses", "", "Comma separated IP addresses to include as Server Alternative Names.")
+	var commonName = flag.String("common-name", "minica root ca", "Root certificate CommonName.")
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage of %s:\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, `
@@ -396,7 +397,7 @@ will not overwrite existing keys or certificates.
 			os.Exit(1)
 		}
 	}
-	issuer, err := getIssuer(*caKey, *caCert, alg, *reuseKeys)
+	issuer, err := getIssuer(*caKey, *caCert, alg, *reuseKeys, *commonName)
 	if err != nil {
 		return err
 	}
